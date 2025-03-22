@@ -8,3 +8,5 @@
 6. training_fasttext_model.py is used to train a FastText model eg. `python main.py train_fasttext -i1 ./data/w2v_data.csv -o ./w2v_model`
 7. training_model.py is used to train a deep learning model for antibody prediction eg. `python main.py train_deep -t ./data/train_agg.csv -v ./data/val_agg.csv -w ./w2v_model/AA_model_fasttext.pt -o ./deep_model`
 8. test_model.py is used to test the trained model eg. `python main.py predict -i ./data/test_agg.csv -o ./deep_model/test -w ./w2v_model/AA_model_fasttext.pt -d ./deep_model/data_model/deep_model.pth`
+
+Note: Cross_Attention_PHV is adapted from Sho and Kurata's 2022 paper: 'Cross-attention PHV: Prediction of human and virus protein-protein interactions using cross-attention–based neural networks'. Their github link is https://github.com/kuratahiroyuki/Cross-Attention_PHV
