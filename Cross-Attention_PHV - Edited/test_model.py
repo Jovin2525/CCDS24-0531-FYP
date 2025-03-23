@@ -6,7 +6,7 @@ import torch.utils.data as data
 from torch.utils.data import DataLoader
 import numpy as np
 from Bio import SeqIO
-from gensim.models import word2vec
+from gensim.models import word2vec, FastText
 import warnings
 import joblib
 import pickle
@@ -52,39 +52,119 @@ def binary_embed(seq):
     """Create binary embedding for amino acid sequence."""
     return np.identity(len(normal_amino_acids))[[normal_amino_acids.index(s) for s in seq]]
 
-def w2v_encoding(seq, model, window, step, k_mer):
-    """Encode sequence using word2vec model."""
+def load_embedding_model(model_path, model_type="word2vec"):
+    """
+    Load either word2vec or FastText model based on model_type parameter
+    
+    Args:
+        model_path (str): Path to the embedding model file
+        model_type (str): Type of embedding model - "word2vec" or "fasttext"
+        
+    Returns:
+        Loaded embedding model
+    """
+    print(f"Loading {model_type} model from {model_path}", flush=True)
+    if model_type.lower() == "word2vec":
+        return word2vec.Word2Vec.load(model_path)
+    elif model_type.lower() == "fasttext":
+        return FastText.load(model_path)
+    else:
+        raise ValueError(f"Unknown model type: {model_type}. Use 'word2vec' or 'fasttext'")
+
+def encoding_sequence(seq, model, window, step, k_mer, model_type="word2vec"):
+    """
+    Encode a sequence using sliding window approach with word2vec or FastText
+    
+    Args:
+        seq (str): Sequence to encode
+        model: Embedding model (word2vec or FastText)
+        window (int): Window size
+        step (int): Step size
+        k_mer (int): Size of k-mers
+        model_type (str): Type of embedding model - "word2vec" or "fasttext"
+        
+    Returns:
+        list: List of encoded vectors
+    """
     vecs = []
+    vector_size = model.vector_size
+    
     for i in range(0, len(seq), step):
-        pep = seq[i:i + window]
+        pep = seq[i: i + window]
         if len(pep) >= k_mer:
-            vec = np.mean([model.wv[pep[j:j + k_mer]] for j in range(len(pep) - k_mer + 1)], axis=0)
-            vecs.append(vec)
+            # Collect embeddings for all k-mers in the window
+            k_mer_vectors = []
+            for j in range(len(pep) - k_mer + 1):
+                k_mer_seq = pep[j: j + k_mer]
+                try:
+                    # Try to get the embedding from the model
+                    k_mer_vectors.append(model.wv[k_mer_seq])
+                except KeyError:
+                    # Handle OOV for word2vec (FastText can handle OOV automatically)
+                    if model_type.lower() == "word2vec":
+                        k_mer_vectors.append(np.zeros(vector_size))
+                    else:
+                        # Re-raise for debugging if this happens with FastText
+                        raise
+            
+            # Average the k-mer vectors
+            if k_mer_vectors:
+                vec = np.mean(k_mer_vectors, axis=0)
+                vecs.append(vec)
+    
     return vecs
 
-def create_mat_dict_w2v(seqs, enc_model, k_mer, filepath="encoded_sequences.pkl"):
-    """Create matrix dictionary for sequences using word2vec model."""
+def create_embedding_dict(seqs, enc_model, k_mer, model_type="word2vec", filepath="encoded_sequences.pkl"):
+    """
+    Create a dictionary of encoded sequences using either word2vec or FastText
+    
+    Args:
+        seqs (list): List of sequences to encode
+        enc_model: The embedding model (word2vec or FastText)
+        k_mer (int): Size of k-mers
+        model_type (str): Type of embedding model - "word2vec" or "fasttext"
+        filepath (str): Path to save/load the encoded sequences
+    
+    Returns:
+        dict: Dictionary mapping sequences to their embeddings
+    """
     if os.path.exists(filepath):
-        print(f"Loading encoded sequences from {filepath}")
+        print(f"Loading encoded sequences from {filepath}", flush=True)
         with open(filepath, "rb") as f:
-            return pickle.load(f)
-    
-    print("Encoding sequences...")
-    seqs = list(set(seqs))
-    seq2mat_dict = {}
-    
-    for i in range(len(seqs)):
-        seq2mat_dict[seqs[i]] = torch.tensor([
-            enc_model.wv[seqs[i][j:j + k_mer]] 
-            for j in range(len(seqs[i]) - k_mer + 1)
-        ])
+            seq2mat_dict = pickle.load(f)
+    else:
+        print(f"Encoding sequences with {model_type}...", flush=True)
+        seqs = list(set(seqs))  # Remove duplicates
+        seq2mat_dict = {}
         
-        if (i + 1) % 1000 == 0:
-            print(f"Encoded {i + 1}/{len(seqs)} sequences")
-
-    print(f"Saving encoded sequences to {filepath}")
-    with open(filepath, "wb") as f:
-        pickle.dump(seq2mat_dict, f)
+        for i, seq in enumerate(seqs):
+            if i % 1000 == 0:
+                print(f"Encoding sequence {i}/{len(seqs)}", flush=True)
+                
+            try:
+                # Both word2vec and FastText use the same embedding lookup interface
+                seq2mat_dict[seq] = torch.tensor([enc_model.wv[seq[j: j + k_mer]] 
+                                                for j in range(len(seq) - k_mer + 1)])
+            except KeyError as e:
+                # Handle out-of-vocabulary k-mers for word2vec (FastText can handle OOV automatically)
+                if model_type.lower() == "word2vec":
+                    print(f"Warning: k-mer not found in word2vec model: {str(e)}", flush=True)
+                    # Use a zero vector as fallback for missing k-mers
+                    vector_size = enc_model.vector_size
+                    seq2mat_dict[seq] = torch.tensor(
+                        [enc_model.wv[seq[j: j + k_mer]] if seq[j: j + k_mer] in enc_model.wv
+                         else np.zeros(vector_size) 
+                         for j in range(len(seq) - k_mer + 1)]
+                    )
+                else:
+                    # This shouldn't happen with FastText but handle it just in case
+                    print(f"Unexpected error with FastText for seq {seq}: {str(e)}", flush=True)
+                    raise
+        
+        # Save the dictionary to a file using pickle
+        with open(filepath, "wb") as f:
+            print(f"Saving encoded sequences to {filepath}", flush=True)
+            pickle.dump(seq2mat_dict, f)
 
     return seq2mat_dict
 
@@ -352,8 +432,25 @@ class DeepNet():
             sys.stdout = original_stdout
             log_file.close()
 
-def pred_main(in_path, out_path, w2v_model_path, deep_model_path, vec_ind, thresh, batch_size, k_mer, seq_max):
-    """Main prediction function with metrics calculation."""
+def pred_main(in_path, out_path, embedding_model_path, deep_model_path, vec_ind, thresh, batch_size, k_mer, seq_max, model_type="word2vec"):
+    """
+    Main prediction function with metrics calculation.
+    
+    Args:
+        in_path (str): Path to input CSV file
+        out_path (str): Path to output directory
+        embedding_model_path (str): Path to embedding model file (word2vec or FastText)
+        deep_model_path (str): Path to deep model file
+        vec_ind (bool): Whether to save feature vectors
+        thresh (float): Classification threshold
+        batch_size (int): Batch size for prediction
+        k_mer (int): Size of k-mers
+        seq_max (int): Maximum sequence length
+        model_type (str): Type of embedding model - "word2vec" or "fasttext"
+    
+    Returns:
+        bool: True if successful
+    """
     # Model parameters
     model_params = {
         "filter_num": 128,
@@ -377,15 +474,16 @@ def pred_main(in_path, out_path, w2v_model_path, deep_model_path, vec_ind, thres
     print("Loading datasets", flush=True)
     data = file_input_csv(in_path)
 
-    print("Loading word2vec model", flush=True)
-    w2v_model = word2vec.Word2Vec.load(w2v_model_path)
+    print(f"Loading {model_type} model", flush=True)
+    embedding_model = load_embedding_model(embedding_model_path, model_type)
 
     print("Encoding amino acid sequences", flush=True)
-    embedding_path = "./encoded_sequences.pkl"
-    enc_dict = create_mat_dict_w2v(
+    embedding_path = f"./encoded_sequences_{model_type}.pkl"
+    enc_dict = create_embedding_dict(
         data["heavy_chain"].values.tolist() + data["light_chain"].values.tolist(),
-        w2v_model,
+        embedding_model,
         encoding_params["k_mer"],
+        model_type,
         embedding_path
     )
 
