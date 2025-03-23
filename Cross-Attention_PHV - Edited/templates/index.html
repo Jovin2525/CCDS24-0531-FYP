@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antibody Pairing Prediction</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .loading {
+            display: none;
+        }
+        .sequence-input {
+            font-family: monospace;
+        }
+        .result-card {
+            transition: all 0.3s ease;
+        }
+        .paired {
+            border-left: 5px solid #198754;
+        }
+        .not-paired {
+            border-left: 5px solid #dc3545;
+        }
+        .model-section {
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .sequence-section {
+            background-color: #f0f8ff;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .probability-bar-container {
+            margin: 15px 0;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 10px;
+        }
+        .probability-bar {
+            height: 30px;
+            background-color: #e9ecef;
+            border-radius: 5px;
+            margin: 10px 0;
+            position: relative;
+            overflow: hidden;
+        }
+        .probability-value {
+            height: 100%;
+            width: 0%;
+            transition: width 0.5s ease, background-color 0.5s ease;
+        }
+        .probability-text {
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            color: #000;
+            font-weight: bold;
+            line-height: 30px;
+            text-shadow: 0px 0px 2px rgba(255, 255, 255, 0.8);
+        }
+        .threshold-marker {
+            position: absolute;
+            height: 100%;
+            width: 2px;
+            background-color: rgba(0,0,0,0.5);
+            z-index: 2;
+        }
+        .threshold-label {
+            position: absolute;
+            font-size: 0.75rem;
+            color: #666;
+            top: -20px;
+        }
+        .confidence-indicator {
+            text-align: center;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        .amino-acid {
+            font-family: monospace;
+            padding: 2px;
+            margin: 1px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+        #modelStatus {
+            font-weight: bold;
+        }
+        .confidence-scale {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            color: #666;
+            margin-top: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container py-4">
+        <header class="pb-3 mb-4 border-bottom">
+            <h1 class="display-5 fw-bold">Antibody Pairing Prediction</h1>
+            <p class="lead">Predict if heavy and light chain sequences form a paired antibody</p>
+        </header>
+
+        <div class="model-section mb-4">
+            <h2>Model Configuration</h2>
+            <p>Status: <span id="modelStatus" class="text-danger">Not Loaded</span></p>
+            
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label for="embeddingPath" class="form-label">Embedding Model Path</label>
+                    <input type="text" class="form-control" id="embeddingPath" placeholder="./embedding_models/model.pt">
+                </div>
+                <div class="col-md-4">
+                    <label for="modelPath" class="form-label">Deep Model Path</label>
+                    <input type="text" class="form-control" id="modelPath" placeholder="./deep_model/deep_model.pth">
+                </div>
+                <div class="col-md-4">
+                    <label for="modelType" class="form-label">Model Type</label>
+                    <select class="form-select" id="modelType">
+                        <option value="word2vec">word2vec</option>
+                        <option value="fasttext">FastText</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label for="kmer" class="form-label">K-mer Size</label>
+                    <input type="number" class="form-control" id="kmer" value="2" min="1" max="10">
+                </div>
+                <div class="col-md-6">
+                    <label for="seqMax" class="form-label">Max Sequence Length</label>
+                    <input type="number" class="form-control" id="seqMax" value="9000" min="100">
+                </div>
+                <div class="col-12">
+                    <button class="btn btn-primary" id="loadModelBtn">Load Model</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="sequence-section">
+            <h2>Sequence Input</h2>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label for="heavyChain" class="form-label">Heavy Chain Sequence</label>
+                    <textarea class="form-control sequence-input" id="heavyChain" rows="6" placeholder="Enter amino acid sequence"></textarea>
+                </div>
+                <div class="col-md-6">
+                    <label for="lightChain" class="form-label">Light Chain Sequence</label>
+                    <textarea class="form-control sequence-input" id="lightChain" rows="6" placeholder="Enter amino acid sequence"></textarea>
+                </div>
+                <div class="col-12 text-center mt-3">
+                    <button class="btn btn-success btn-lg" id="predictBtn" disabled>Predict Pairing</button>
+                    <div class="spinner-border text-primary loading mt-3" id="loading" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Example sequences -->
+            <div class="mt-4">
+                <h5>Example Sequences:</h5>
+                <div class="row">
+                    <div class="col-md-6">
+                        <button class="btn btn-outline-secondary btn-sm mb-2" id="loadExample1">Example 1</button>
+                    </div>
+                    <div class="col-md-6">
+                        <button class="btn btn-outline-secondary btn-sm mb-2" id="loadExample2">Example 2</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-4" id="resultSection" style="display: none;">
+            <h2>Prediction Result</h2>
+            <div class="card result-card" id="resultCard">
+                <div class="card-body">
+                    <h5 class="card-title">Pairing Prediction: <span id="predictionResult"></span></h5>
+                    <h6 class="card-subtitle mb-2 text-muted">Probability Score</h6>
+                    
+                    <div class="probability-bar-container">
+                        <div class="probability-bar">
+                            <!-- Threshold markers -->
+                            <div class="threshold-marker" style="left: 25%">
+                                <span class="threshold-label">Low</span>
+                            </div>
+                            <div class="threshold-marker" style="left: 50%">
+                                <span class="threshold-label">Medium</span>
+                            </div>
+                            <div class="threshold-marker" style="left: 75%">
+                                <span class="threshold-label">High</span>
+                            </div>
+                            
+                            <!-- Probability bar -->
+                            <div class="probability-value" id="probabilityBar"></div>
+                            <div class="probability-text" id="probabilityText">0%</div>
+                        </div>
+                        
+                        <div class="confidence-scale">
+                            <span>0%</span>
+                            <span>25%</span>
+                            <span>50%</span>
+                            <span>75%</span>
+                            <span>100%</span>
+                        </div>
+                        
+                        <div class="confidence-indicator mt-2">
+                            Confidence: <span id="confidenceLevel">Unknown</span>
+                            (Raw score: <span id="exactConfidence">0.0000</span>)
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Example sequences
+        const examples = {
+            example1: {
+                heavy: "EVQLVESGGGLVQPGGSLRLSCAASGFTFSSYAMSWVRQAPGKGLEWVSAISGSGGSTYYADSVKGRFTISRDNSKNTLYLQMNSLRAEDTAVYYCAKDRLSITIRPRYYGLDVWGQGTLVTVSS",
+                light: "DIQMTQSPSSLSASVGDRVTITCRASQGIRNDLGWYQQKPGKAPKRLIYAASSLQSGVPSRFSGSGSGTEFTLTISSLQPEDFATYYCLQQNSDPPTFGQGTKVEIK"
+            },
+            example2: {
+                heavy: "QVQLQESGPGLVKPSETLSLTCSVSGASISNYYWSWIRQPPGKGLEWIGYISYSGSTLNNPSLKSRVTISVDTSKNQFSLKLSSVTAADTAVYYCAQKRGSSDYWGQGTLVTVSS",
+                light: "DIVMTQSPSTLSASVGDRVTITCRASQSISSWLAWYQQKPGKAPKLLIYKASSLESGVPSRFSGSGSGTEFTLTISSLQPDDFATYYCQQYNSYSITFGQGTRLEIK"
+            }
+        };
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // DOM elements
+            const modelStatus = document.getElementById('modelStatus');
+            const loadModelBtn = document.getElementById('loadModelBtn');
+            const predictBtn = document.getElementById('predictBtn');
+            const loading = document.getElementById('loading');
+            const resultSection = document.getElementById('resultSection');
+            const resultCard = document.getElementById('resultCard');
+            const predictionResult = document.getElementById('predictionResult');
+            const probabilityBar = document.getElementById('probabilityBar');
+            const probabilityText = document.getElementById('probabilityText');
+            const confidenceLevel = document.getElementById('confidenceLevel');
+            const exactConfidence = document.getElementById('exactConfidence');
+            
+            // Load example buttons
+            document.getElementById('loadExample1').addEventListener('click', () => {
+                document.getElementById('heavyChain').value = examples.example1.heavy;
+                document.getElementById('lightChain').value = examples.example1.light;
+            });
+            
+            document.getElementById('loadExample2').addEventListener('click', () => {
+                document.getElementById('heavyChain').value = examples.example2.heavy;
+                document.getElementById('lightChain').value = examples.example2.light;
+            });
+
+            // Load model
+            loadModelBtn.addEventListener('click', async function() {
+                const embeddingPath = document.getElementById('embeddingPath').value;
+                const modelPath = document.getElementById('modelPath').value;
+                const modelType = document.getElementById('modelType').value;
+                const kmer = document.getElementById('kmer').value;
+                const seqMax = document.getElementById('seqMax').value;
+                
+                if (!embeddingPath || !modelPath) {
+                    alert('Please provide both embedding and model paths');
+                    return;
+                }
+                
+                try {
+                    loadModelBtn.disabled = true;
+                    loading.style.display = 'inline-block';
+                    
+                    const response = await fetch('/initialize', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            embedding_path: embeddingPath,
+                            model_path: modelPath,
+                            model_type: modelType,
+                            k_mer: kmer,
+                            seq_max: seqMax
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        modelStatus.textContent = 'Loaded';
+                        modelStatus.className = 'text-success';
+                        predictBtn.disabled = false;
+                    } else {
+                        modelStatus.textContent = 'Error: ' + (result.error || 'Unknown error');
+                        modelStatus.className = 'text-danger';
+                    }
+                } catch (error) {
+                    modelStatus.textContent = 'Error: ' + error.message;
+                    modelStatus.className = 'text-danger';
+                } finally {
+                    loadModelBtn.disabled = false;
+                    loading.style.display = 'none';
+                }
+            });
+            
+            // Predict pairing
+            predictBtn.addEventListener('click', async function() {
+                const heavyChain = document.getElementById('heavyChain').value.trim();
+                const lightChain = document.getElementById('lightChain').value.trim();
+                
+                if (!heavyChain || !lightChain) {
+                    alert('Please enter both heavy and light chain sequences');
+                    return;
+                }
+                
+                try {
+                    predictBtn.disabled = true;
+                    loading.style.display = 'inline-block';
+                    resultSection.style.display = 'none';
+                    
+                    const response = await fetch('/predict', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            heavy_chain: heavyChain,
+                            light_chain: lightChain
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.error) {
+                        alert('Error: ' + result.error);
+                        return;
+                    }
+                    
+                    // Display result
+                    resultSection.style.display = 'block';
+                    predictionResult.textContent = result.prediction;
+                    
+                    // Set probability bar with color gradient
+                    const probability = result.probability * 100;
+                    const hue = Math.min(probability * 1.2, 120); // 0 = red, 120 = green
+                    probabilityBar.style.width = `${probability}%`;
+                    probabilityBar.style.backgroundColor = `hsl(${hue}, 80%, 45%)`;
+                    probabilityText.textContent = `${probability.toFixed(2)}%`;
+                    
+                    // Display the exact confidence value
+                    exactConfidence.textContent = result.probability.toFixed(4);
+                    
+                    // Set confidence level
+                    let confidence = "Low Confidence";
+                    let confidenceClass = "text-danger";
+                    
+                    if (probability > 75) {
+                        confidence = "High Confidence";
+                        confidenceClass = "text-success";
+                    } else if (probability > 50) {
+                        confidence = "Medium Confidence";
+                        confidenceClass = "text-warning";
+                    } else if (probability > 25) {
+                        confidence = "Low Confidence";
+                        confidenceClass = "text-danger";
+                    } else {
+                        confidence = "Very Low Confidence";
+                        confidenceClass = "text-danger";
+                    }
+                    
+                    confidenceLevel.textContent = confidence;
+                    confidenceLevel.className = confidenceClass;
+                    
+                    // Style result card
+                    resultCard.className = result.prediction === 'Paired' ? 
+                        'card result-card paired' : 'card result-card not-paired';
+                    
+                } catch (error) {
+                    alert('Error: ' + error.message);
+                } finally {
+                    predictBtn.disabled = false;
+                    loading.style.display = 'none';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

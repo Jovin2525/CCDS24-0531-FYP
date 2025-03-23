@@ -8,6 +8,7 @@
 6. training_fasttext_model.py is used to train a FastText model eg. `python main.py train_embedding -i ./data/w2v_data.csv -o ./embedding_models -m fasttext`
 7. training_model.py is used to train a deep learning model for antibody prediction eg. `python main.py train_deep -t ./data/train.csv -v ./data/val.csv -w ./embedding_models/[embedding_model] -o ./deep_model -m [model_type]`
 8. test_model.py is used to test the trained model eg. `python main.py predict -t ./data/test.csv -w ./embedding_models/[embedding_model].pt -d ./deep_model/data_model/deep_model.pth -o ./results -m [model_type]`
+9. To run the web application, simply run `python app.py` after ensuring you are in the 'Cross-Attention_PHV - Edited' folder
 
 - w2v_data.csv (used to train both embedding models), train_agg.csv, val_agg.csv and test_agg.csv are found in 'Cross-Attention_PHV - Edited/data'. train_agg.csv, val_agg.csv and test_agg.csv represent the final dataset with negative samples generated via dissimilarity-based negative sampling, motif-based approach and VAE.
 
